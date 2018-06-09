@@ -93,7 +93,7 @@ public class AnnotationAwareRetryOperationsInterceptor implements IntroductionIn
 
 	private BeanFactory beanFactory;
 
-	private RetryListener[] listeners;
+	private RetryListener[] globalListeners;
 
 	/**
 	 * @param sleeper the sleeper to set
@@ -126,13 +126,13 @@ public class AnnotationAwareRetryOperationsInterceptor implements IntroductionIn
 	}
 
 	/**
-	 * Retry listeners to apply to all operations.
-	 * @param listeners the listeners
+	 * Default retry listeners to apply to all operations.
+	 * @param globalListeners the default listeners
 	 */
-	public void setListeners(Collection<RetryListener> listeners) {
-		ArrayList<RetryListener> retryListeners = new ArrayList<RetryListener>(listeners);
+	public void setListeners(Collection<RetryListener> globalListeners) {
+		ArrayList<RetryListener> retryListeners = new ArrayList<RetryListener>(globalListeners);
 		AnnotationAwareOrderComparator.sort(retryListeners);
-		this.listeners = retryListeners.toArray(new RetryListener[0]);
+		this.globalListeners = retryListeners.toArray(new RetryListener[0]);
 	}
 
 	@Override
@@ -208,7 +208,7 @@ public class AnnotationAwareRetryOperationsInterceptor implements IntroductionIn
 	}
 
 	private MethodInterceptor getStatelessInterceptor(Object target, Method method, Retryable retryable) {
-		RetryTemplate template = createTemplate();
+		RetryTemplate template = createTemplate(retryable.listeners());
 		template.setRetryPolicy(getRetryPolicy(retryable));
 		template.setBackOffPolicy(getBackoffPolicy(retryable.backoff()));
 		return RetryInterceptorBuilder.stateless()
@@ -219,7 +219,7 @@ public class AnnotationAwareRetryOperationsInterceptor implements IntroductionIn
 	}
 
 	private MethodInterceptor getStatefulInterceptor(Object target, Method method, Retryable retryable) {
-		RetryTemplate template = createTemplate();
+		RetryTemplate template = createTemplate(retryable.listeners());
 		template.setRetryContextCache(this.retryContextCache);
 
 		CircuitBreaker circuit = AnnotationUtils.findAnnotation(method, CircuitBreaker.class);
@@ -254,12 +254,22 @@ public class AnnotationAwareRetryOperationsInterceptor implements IntroductionIn
 				.build();
 	}
 
-	private RetryTemplate createTemplate() {
+	private RetryTemplate createTemplate(String[] listenersBeanNames) {
 		RetryTemplate template = new RetryTemplate();
-		if (listeners!=null) {
-			template.setListeners(listeners);
+		if (listenersBeanNames.length > 0) {
+			template.setListeners(getListenersBeans(listenersBeanNames));
+		} else if (globalListeners !=null) {
+			template.setListeners(globalListeners);
 		}
 		return template;
+	}
+
+	private RetryListener[] getListenersBeans(String[] listenersBeanNames) {
+		RetryListener[] listeners = new RetryListener[listenersBeanNames.length];
+		for (int i = 0; i < listeners.length; i++) {
+			listeners[i] = beanFactory.getBean(listenersBeanNames[i], RetryListener.class);
+		}
+		return listeners;
 	}
 
 	private MethodInvocationRecoverer<?> getRecoverer(Object target, Method method) {
